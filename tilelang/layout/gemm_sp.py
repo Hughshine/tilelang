@@ -135,6 +135,13 @@ def make_cutlass_metadata_layout_sm8x(buffer: tvm.tirx.Buffer, mma_dtype: str):
     group = 32 if buffer.dtype.bits == 16 else 16
     interweave = 4 if buffer.dtype.bits == 16 else 2
 
+    # The interleave is a bijection only when every group-row block and 2-column pair is complete;
+    # a partial one silently collides and writes past the m*k buffer, so reject it here.
+    if m % group != 0:
+        raise ValueError(f"metadata rows M={m} must be a multiple of {group} for the sm8x interleave")
+    if k % 2 != 0:
+        raise ValueError(f"metadata columns K={k} must be even for the sm8x interleave")
+
     def ColumnMajorInterleaved(i: int, j: int) -> int:
         i = i // group * group + (i % 8) * interweave + (i % group) // 8
         topright = (1 - (i % 2)) & (j % 2)
