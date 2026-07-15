@@ -20,6 +20,7 @@ from tilelang.contrib.nvcc import (
     have_mbarrier,
     have_pdl,
     have_tma,
+    parse_compute_version,
 )
 from tilelang.transform import PassContext
 
@@ -63,6 +64,48 @@ def _module_has_shared_barrier(mod: IRModule) -> bool:
         if isinstance(func, PrimFunc):
             post_order_visit(func.body, visit)
     return found
+
+
+# barrier.cluster.* / %cluster_ctarank -> sm_90; clusterlaunchcontrol.* -> sm_100.
+_CLUSTER_OPS_SM90 = frozenset(
+    (
+        "tl.cluster_arrive_relaxed",
+        "tl.cluster_arrive",
+        "tl.cluster_wait",
+        "tl.cluster_sync",
+        "tl.block_rank_in_cluster",
+    )
+)
+_CLUSTER_OPS_SM100 = frozenset(
+    (
+        "tl.clc_try_cancel",
+        "tl.clc_try_cancel_multicast",
+        "tl.clc_is_canceled",
+        "tl.clc_get_first_ctaid_x",
+        "tl.clc_get_first_ctaid_y",
+        "tl.clc_get_first_ctaid_z",
+    )
+)
+
+
+def _module_cluster_op_min_major(mod: IRModule) -> int:
+    """Highest min-arch major version required by any cluster builtin used in the
+    module: 10 for a ``T.clc_*`` op, 9 for a ``T.cluster_*`` op, 0 for none.
+    """
+    required = 0
+
+    def visit(node):
+        nonlocal required
+        if isinstance(node, tirx.Call) and isinstance(node.op, tirx.op.Op):
+            if node.op.name in _CLUSTER_OPS_SM100:
+                required = max(required, 10)
+            elif node.op.name in _CLUSTER_OPS_SM90:
+                required = max(required, 9)
+
+    for _, func in mod.functions.items():
+        if isinstance(func, PrimFunc):
+            post_order_visit(func.body, visit)
+    return required
 
 
 def CUDAPassPipelineBodyPrologue(mod: IRModule, target: Target) -> IRModule:
@@ -167,6 +210,21 @@ def CUDAPassPipelineBody(mod: IRModule, target: Target) -> IRModule:
             f"targets."
         )
     mod = tilelang.cuda.transform.LowerSharedBarrier()(mod)
+
+    # @CUDA-specific
+    # The cluster device templates gate their body behind an arch #if whose #else is
+    # a __trap(), so a too-low target compiles then dies at launch. Reject up front
+    # with the required arch, as T.alloc_barrier does above.
+    cluster_min_major = _module_cluster_op_min_major(mod)
+    if cluster_min_major:
+        compute_version = get_target_compute_version(target)
+        major, _ = parse_compute_version(compute_version)
+        if major < cluster_min_major:
+            family = "T.clc_*" if cluster_min_major >= 10 else "T.cluster_*"
+            raise ValueError(
+                f"{family} cluster builtins require sm_{cluster_min_major * 10} or later, but the current "
+                f"target is sm_{compute_version.replace('.', '')} (compute capability {compute_version})."
+            )
 
     # @CUDA-specific
     has_tma = module_has_tma(mod)
