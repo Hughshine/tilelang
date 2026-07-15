@@ -26,10 +26,16 @@ def rng_init(seed, seq=None, off=0, generator="curandStatePhilox4_32_10_t") -> t
     assert generator in ["curandStateMRG32k3a_t", "curandStatePhilox4_32_10_t", "curandStateXORWOW_t"]
     seed = tirx.convert(seed)
     if seq is None:
-        bx = T.get_block_binding()
-        ex = T.kernel.get_thread_extent()
-        tx = T.get_thread_binding()
-        id = tx + bx * ex
+        thread_bindings = T.get_thread_bindings()
+        block_bindings = T.get_block_bindings()
+        thread_extents = T.kernel.get_thread_extents()
+        block_extents = T.kernel.get_block_extents()
+        # Flatten every block/thread dim (not just x) so threads differing only in
+        # y/z get distinct curand streams; reversed() keeps x the fastest-varying axis.
+        dims = list(reversed(list(zip(block_bindings, block_extents)))) + list(reversed(list(zip(thread_bindings, thread_extents))))
+        id = tirx.convert(0)
+        for var, extent in dims:
+            id = id * extent + var
         seq = tirx.convert(id)
     else:
         seq = tirx.convert(seq)
