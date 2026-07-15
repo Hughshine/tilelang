@@ -12,6 +12,16 @@ def _validate_rounding_mode(rounding_mode):
     raise ValueError(f"Invalid rounding mode '{rounding_mode}'. Must be one of: {valid_modes}")
 
 
+# float8 is excluded: the CUDA fast-math lowering has no device function for it (nor for ints),
+# silently emitting an identity or undefined-symbol call, so those dtypes are rejected up front.
+_FASTMATH_FLOAT_DTYPES = frozenset({"float16", "bfloat16", "float32", "float64"})
+
+
+def _validate_fastmath_dtype(x: PrimExpr) -> None:
+    if str(x.dtype) not in _FASTMATH_FLOAT_DTYPES:
+        raise ValueError(f"fast-math intrinsics require a floating dtype in {sorted(_FASTMATH_FLOAT_DTYPES)}, got '{x.dtype}'")
+
+
 def __log(x: PrimExpr) -> PrimExpr:
     """Calculate log(x) with fast math
 
@@ -26,6 +36,7 @@ def __log(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__log"), x)
 
 
@@ -43,6 +54,7 @@ def __log2(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__log2"), x)
 
 
@@ -60,6 +72,7 @@ def __log10(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__log10"), x)
 
 
@@ -77,6 +90,7 @@ def __tan(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__tan"), x)
 
 
@@ -94,6 +108,7 @@ def __cos(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__cos"), x)
 
 
@@ -111,6 +126,7 @@ def __sin(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__sin"), x)
 
 
@@ -128,6 +144,7 @@ def __exp10(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__exp10"), x)
 
 
@@ -145,6 +162,7 @@ def __exp(x: PrimExpr) -> PrimExpr:
         The result.
     """
     x = tirx.convert(x)
+    _validate_fastmath_dtype(x)
     return tirx.call_intrin(x.dtype, tirx.op.Op.get("tl.__exp"), x)
 
 
